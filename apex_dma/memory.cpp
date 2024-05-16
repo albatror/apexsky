@@ -157,37 +157,36 @@ int Memory::open_os() {
   return 0;
 }
 
-int Memory::open_proc(const char *name) {
+int Memory::open_proc(const std::string& name) {
   int ret;
-  const char *target_proc=name;
-  const char *target_module = name;
- 
-  if (!(ret = os.process_by_name(CSliceRef<uint8_t>(target_proc),
-                                &proc.hProcess))) {
-    const struct ProcessInfo *info = proc.hProcess.info();
+  const std::string targetProcessName = name;
+  const std::string targetModuleName = name;
 
-    std::cout << target_proc << xorstr_(" process found: 0x") << std::hex
+  if (!(ret = os.process_by_name(CSliceRef<uint8_t>(targetProcessName), &proc.hProcess))) {
+    const ProcessInfo* info = proc.hProcess.info();
+
+    std::cout << targetProcessName << xorstr_(" process found: 0x") << std::hex
               << info->address << xorstr_("] ") << info->pid << " "
               << info->name << " " << info->path << std::endl;
-    
-    //修复cr3
-    const short MZ_HEADER = 0x5a4d;
-    char *base_section = new char[8];
-    long *base_section_value= (long *)base_section;
-    memset(base_section, 0, 8);
-    CSliceMut<uint8_t> slice(base_section, 8);
-    os.read_raw_into(proc.hProcess.info()->address + 0x520, slice); //win10
-    proc.baseaddr=*base_section_value;
-    //遍历dtb
-    for (size_t dtb = 0; dtb < SIZE_MAX; dtb += 0x1000){
-        proc.hProcess.set_dtb(dtb, Address_INVALID);
-        short c5;
-        Read<short>(*base_section_value,c5);
-            if(c5==MZ_HEADER){
-	break;
-            }
-        }
-      status = process_status::FOUND_READY;
+
+    // Fix CR3
+    const uint16_t MZ_HEADER_MAGIC = 0x5a4d;
+    std::array<std::byte, 8> baseSection;
+    std::memset(baseSection.data(), 0, 8);
+    CSliceMut<uint8_t> slice(baseSection.data(), 8);
+    os.read_raw_into(proc.hProcess.info()->address + 0x520, slice); // win10
+    proc.baseaddr = *reinterpret_cast<long*>(baseSection.data());
+
+    // Iterate over DTB
+    for (size_t dtb = 0; dtb < SIZE_MAX; dtb += 0x1000) {
+      proc.hProcess.set_dtb(dtb, Address_INVALID);
+      short c5;
+      std::memcpy(&c5, baseSection.data(), sizeof(short));
+      if (c5 == MZ_HEADER_MAGIC) {
+        break;
+      }
+    }
+    status = process_status::FOUND_READY;
   } else {
     status = process_status::NOT_FOUND;
   }
